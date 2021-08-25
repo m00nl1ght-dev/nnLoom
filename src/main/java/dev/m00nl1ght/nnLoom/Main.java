@@ -23,7 +23,7 @@ public class Main {
             final var nnPlatform = new NNPlatformOpenCL(context);
             nnPlatform.init();
 
-            nnPlatform.train();
+
 
             nnPlatform.dispose();
             CLContext.release();

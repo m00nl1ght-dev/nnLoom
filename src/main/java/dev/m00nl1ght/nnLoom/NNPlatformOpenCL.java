@@ -2,9 +2,9 @@ package dev.m00nl1ght.nnLoom;
 
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
 import org.lwjgl.BufferUtils;
-import org.lwjgl.PointerBuffer;
 
 import java.nio.FloatBuffer;
+import java.util.List;
 import java.util.Objects;
 
 import static dev.m00nl1ght.nnLoom.opencl.CLUtil.*;
@@ -13,13 +13,13 @@ import static org.lwjgl.system.MemoryUtil.*;
 
 public class NNPlatformOpenCL implements NNPlatform {
 
-    private static final int INPUT_SIZE = 100;
-
     private final CLContext clContext;
 
     private long clCommandQueue = -1;
     private long clProgram = -1;
-    private long clKernel = -1;
+    private long clKernelForward = -1;
+    private long clKernelBackH = -1;
+    private long clKernelBackO = -1;
 
     public NNPlatformOpenCL(CLContext clContext) {
         this.clContext = Objects.requireNonNull(clContext);
@@ -47,88 +47,111 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         checkCLError(clBuildProgram(clProgram, clContext.dev(), "", null, NULL));
 
-        clKernel = clCreateKernel(clProgram, "sum", errBuffer);
+        clKernelForward = clCreateKernel(clProgram, "forward", errBuffer);
+        checkCLError(errBuffer);
+
+        clKernelBackH = clCreateKernel(clProgram, "backH", errBuffer);
+        checkCLError(errBuffer);
+
+        clKernelBackO = clCreateKernel(clProgram, "backO", errBuffer);
         checkCLError(errBuffer);
 
     }
 
-    private FloatBuffer getABuffer() {
-        // Create float array from 0 to size-1.
-        FloatBuffer aBuff = BufferUtils.createFloatBuffer(INPUT_SIZE);
-        float[] tempData = new float[INPUT_SIZE];
-        for (int i = 0; i < INPUT_SIZE; i++) {
-            tempData[i] = i;
-        }
-        aBuff.put(tempData);
-        aBuff.rewind();
-        return aBuff;
-    }
-
-    private FloatBuffer getBBuffer() {
-        // Create float array from size-1 to 0.
-        // This means that the result should be size-1 for each element.
-        FloatBuffer bBuff = BufferUtils.createFloatBuffer(INPUT_SIZE);
-        float[] tempData = new float[INPUT_SIZE];
-        for (int j = 0, i = INPUT_SIZE - 1; j < INPUT_SIZE; j++, i--) {
-            tempData[j] = i;
-        }
-        bBuff.put(tempData);
-        bBuff.rewind();
-        return bBuff;
-    }
-
     @Override
-    public void train() {
+    public FloatBuffer eval(NNetwork network, FloatBuffer input, int inputCount) {
 
         checkContext(true);
         final var errBuffer = BufferUtils.createIntBuffer(1);
 
-        // Create OpenCL memory object containing the first buffer's list of numbers.
-        final var aMemory = clCreateBuffer(clContext.get(), CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR, getABuffer(), errBuffer);
+        final var bfInput = clCreateBuffer(clContext.get(), CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR, input, errBuffer);
         checkCLError(errBuffer);
 
-        // Create OpenCL memory object containing the second buffer's list of numbers.
-        final var bMemory = clCreateBuffer(clContext.get(), CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR, getBBuffer(), errBuffer);
-        checkCLError(errBuffer);
+        final var bfVals = createValBuffers(network);
+        final var bfWeights = createWeightBuffers(network);
 
-        // Remember the length argument here is in bytes. 4 bytes per float.
-        final var resultMemory = clCreateBuffer(clContext.get(), CL_MEM_READ_ONLY, INPUT_SIZE * 4, errBuffer);
-        checkCLError(errBuffer);
-
-        clSetKernelArg1p(clKernel, 0, aMemory);
-        clSetKernelArg1p(clKernel, 1, bMemory);
-        clSetKernelArg1p(clKernel, 2, resultMemory);
-        clSetKernelArg1i(clKernel, 3, INPUT_SIZE);
-
-        final int dimensions = 1;
-        // In here we put the total number of work items we want in each dimension.
-        PointerBuffer globalWorkSize = BufferUtils.createPointerBuffer(dimensions);
-        globalWorkSize.put(0, INPUT_SIZE);
+        final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
 
         final var sTime = System.nanoTime();
 
-        // Run the specified number of work units using our OpenCL program kernel.
-        checkCLError(clEnqueueNDRangeKernel(clCommandQueue, clKernel, dimensions, null, globalWorkSize, null, null, null));
-        checkCLError(clFinish(clCommandQueue));
+        for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
+
+            feedForward(network, bfInput, inputIdx, bfVals, bfWeights);
+
+            results.position(network.getOutputCount() * inputIdx);
+            results.limit(network.getOutputCount() * (inputIdx + 1) - 1);
+            final var bfResult = bfVals[network.getLayers().size() - 1];
+            clEnqueueReadBuffer(clCommandQueue, bfResult, true, 0, results, null, null);
+
+        }
 
         final var eTime = System.nanoTime();
 
-        // This reads the result memory buffer.
-        FloatBuffer resultBuff = BufferUtils.createFloatBuffer(INPUT_SIZE);
+        System.out.println("Evaluated " + inputCount + " input data sets in " + (eTime - sTime) + " nanos.");
 
-        // We read the buffer in blocking mode so that when the method returns we know that the result buffer is full.
-        clEnqueueReadBuffer(clCommandQueue, resultMemory, true, 0, resultBuff, null, null);
+        checkCLError(clReleaseMemObject(bfInput));
+        for (final var bf : bfVals) checkCLError(clReleaseMemObject(bf));
+        for (final var bf : bfWeights) checkCLError(clReleaseMemObject(bf));
 
-        for (int i = 0; i < resultBuff.capacity(); i++) {
-            if (resultBuff.get(i) != 99f) throw new RuntimeException("Incorrect value at idx " + i);
+        results.clear();
+        return results;
+
+    }
+
+    private void feedForward(NNetwork network, long bfInput, int inputIdx, long[] bfVals, long[] bfWeights) {
+
+        final var layers = network.getLayers();
+        final var globalWorkSize = BufferUtils.createPointerBuffer(1);
+
+        for (int layerIdx = 0; layerIdx < layers.size(); layerIdx++) {
+
+            final var layer = layers.get(layerIdx);
+
+            if (layerIdx == 0) {
+                clSetKernelArg1p(clKernelForward, 0, bfInput);
+                clSetKernelArg1i(clKernelForward, 1, inputIdx * network.getInputCount());
+            } else {
+                clSetKernelArg1p(clKernelForward, 0, bfVals[layerIdx - 1]);
+                clSetKernelArg1i(clKernelForward, 1, 0);
+            }
+
+            clSetKernelArg1i(clKernelForward, 2, layer.getEdgeCount());
+            clSetKernelArg1p(clKernelForward, 3, bfWeights[layerIdx]);
+            clSetKernelArg1p(clKernelForward, 4, bfVals[layerIdx]);
+            clSetKernelArg1f(clKernelForward, 5, layer.getBias());
+            globalWorkSize.put(0, layer.getNodeCount());
+
+            checkCLError(clEnqueueNDRangeKernel(clCommandQueue, clKernelForward, 1, null, globalWorkSize, null, null, null));
+            checkCLError(clFinish(clCommandQueue));
+
         }
 
-        System.out.println("All values were correct! Took " + (eTime - sTime) + " nanos.");
-        System.out.println("--------------------------------------------");
+    }
 
-        checkCLError(clReleaseMemObject(aMemory));
-        checkCLError(clReleaseMemObject(bMemory));
-        checkCLError(clReleaseMemObject(resultMemory));
+    private long[] createValBuffers(NNetwork network) {
+        final var buffers = new long[network.getLayers().size()];
+        final var errBuffer = BufferUtils.createIntBuffer(1);
+        List<NNLayer> layers = network.getLayers();
+        for (int i = 0; i < layers.size(); i++) {
+            buffers[i] = clCreateBuffer(clContext.get(), CL_MEM_READ_ONLY, layers.get(i).getNodeCount() * 4, errBuffer);
+            checkCLError(errBuffer);
+        }
+        return buffers;
+    }
+
+    private long[] createWeightBuffers(NNetwork network) {
+        final var buffers = new long[network.getLayers().size()];
+        final var errBuffer = BufferUtils.createIntBuffer(1);
+        List<NNLayer> layers = network.getLayers();
+        for (int i = 0; i < layers.size(); i++) {
+            buffers[i] = clCreateBuffer(clContext.get(), CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR, layers.get(i).getWeights(), errBuffer);
+            checkCLError(errBuffer);
+        }
+        return buffers;
+    }
+
+    @Override
+    public void train(NNetwork network) {
 
     }
 
@@ -138,7 +161,9 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkContext(true);
 
         checkCLError(clReleaseCommandQueue(clCommandQueue));
-        checkCLError(clReleaseKernel(clKernel));
+        checkCLError(clReleaseKernel(clKernelForward));
+        checkCLError(clReleaseKernel(clKernelBackH));
+        checkCLError(clReleaseKernel(clKernelBackO));
         checkCLError(clReleaseProgram(clProgram));
 
         clCommandQueue = -1;
