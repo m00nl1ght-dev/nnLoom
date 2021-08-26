@@ -67,7 +67,7 @@ kernel void backO
 {
     const int i = get_global_id(0);
 
-    float delta = (cVals[i] - tVals[i]) * ( cVals[i] * ( 1 - cVals[i] ) );
+    float delta = (cVals[i] - tVals[i + tOffset]) * ( cVals[i] * ( 1 - cVals[i] ) );
     cDeltas[i] = delta;
 
     for (int p = 0; p < pSize; p++) {
