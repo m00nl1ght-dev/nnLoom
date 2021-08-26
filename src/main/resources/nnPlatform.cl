@@ -1,4 +1,19 @@
 
+kernel void sum
+(
+    global const float* a,
+    global const float* b,
+    global float* result,
+    int const size
+)
+{
+    const int itemId = get_global_id(0);
+
+    if (itemId < size) {
+        result[itemId] = a[itemId] + b[itemId];
+    }
+}
+
 kernel void forward
 (
     global const float* input,          // output values from previous layer
@@ -15,59 +30,60 @@ kernel void forward
     float v = bias;
 
     for (int w = 0; w < inputSize; w++) {
-        v +=  input[w + inputOffset] * weights[offset + w];
+        v += input[w + inputOffset] * weights[offset + w];
     }
 
-    output[i] = sigmoid(v);
+    output[i] = ( 1 / ( 1 + exp( - v ) ) );
 }
 
 kernel void backH
 (
-
+    const int cSize,                     // number of nodes in current layer
+    global float* cWeights,              // weights for current layer
+    global float* cDeltas,               // delta values for current layer
+    global const float* cVals,           // values for current layer
+    const int nSize,                     // number of nodes in next layer
+    global const float* nWeights,        // weights for next layer
+    global const float* nDeltas,         // delta values for next layer
+    const int pSize,                     // number of nodes in previous layer
+    global const float* pVals,           // values for previous layer
+    const float mpx                      // multiplier for weight changes
 )
 {
     const int i = get_global_id(0);
-    const int offset = i * inputSize;
 
     float delta = 0;
-    for (int j = 0; j < nextnumNodes; j++) {
-        delta += nextnodes[j].delta * nextnodes[j].weights[i];
+
+    for (int j = 0; j < nSize; j++) {
+        delta += nDeltas[j] * nWeights[j * nSize + i];
     }
 
-    delta *= devsigmoid(nodes[i].output);
-    nodes[i].delta = delta;
+    delta *= ( cVals[i] * ( 1 - cVals[i] ) );
+    cDeltas[i] = delta;
 
-    for (int j = 0; j != nodes[i].numberOfWeights; j++) {
-        nodes[i].weights[j] -= a*delta*prevnodes[j].output;
+    for (int j = 0; j < pSize; j++) {
+        cWeights[i * cSize + j] -= mpx * delta * pVals[j];
     }
 }
 
 kernel void backO
 (
-
+    const int cSize,                     // number of nodes in current layer
+    global float* cWeights,              // weights for current layer
+    global float* cDeltas,               // delta values for current layer
+    global const float* cVals,           // values for current layer
+    const int pSize,                     // number of nodes in previous layer
+    global const float* pVals,           // values for previous layer
+    global const float* tVals,           // target values from training data
+    const float mpx                      // multiplier for weight changes
 )
 {
     const int i = get_global_id(0);
-    const int offset = i * inputSize;
 
-    float delta = 0;
+    float delta = (cVals[i] - tVals[i]) * ( cVals[i] * ( 1 - cVals[i] ) );
+    cDeltas[i] = delta;
 
-    delta = (nodes[i].output-targets[i])*devsigmoid(nodes[i].output);
-
-    for (int j = 0; j != nodes[i].numberOfWeights; j++)
-        nodes[i].weights[j] -= a*delta*prevnodes[j].output;
-
-    nodes[i].delta=delta;
-}
-
-float inline sigmoid(float v)
-{
-	if (v < -100) return 0;
-	if (v > 100) return 1;
-	return 1 / ( 1 + exp( - x ) );
-}
-
-float inline devsigmoid(float x)
-{
-	return ( x * ( 1 - x ) );
+    for (int j = 0; j < pSize; j++) {
+        cWeights[i * cSize + j] -= mpx * delta * pVals[j];
+    }
 }

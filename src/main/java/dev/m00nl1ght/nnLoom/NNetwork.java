@@ -13,6 +13,12 @@ public class NNetwork {
         this.layers = List.copyOf(layers);
     }
 
+    public void init(float spread) {
+        for (final var layer : layers) {
+            layer.init(spread);
+        }
+    }
+
     public int getInputCount() {
         return inputCount;
     }

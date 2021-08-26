@@ -38,4 +38,13 @@ public class NNLayer {
         this.bias = bias;
     }
 
+    public void init(float spread) {
+        weights.clear();
+        for (int i = 0; i < weights.capacity(); i++) {
+            //weights.put((float) (Math.random() * 2f - 1f) * spread);
+            weights.put(1f);
+        }
+        weights.clear();
+    }
+
 }
