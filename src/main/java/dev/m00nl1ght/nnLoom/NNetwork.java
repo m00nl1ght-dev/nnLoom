@@ -2,6 +2,7 @@ package dev.m00nl1ght.nnLoom;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 public class NNetwork {
 
@@ -25,6 +26,12 @@ public class NNetwork {
         return layers.get(layers.size() - 1).getNodeCount();
     }
 
+    public void init(Random random) {
+        for (final var layer : layers) {
+            layer.init(random);
+        }
+    }
+
     public static Builder builder(int inputCount) {
         if (inputCount <= 0) throw new IllegalArgumentException();
         return new Builder(inputCount);
@@ -44,9 +51,9 @@ public class NNetwork {
             return new NNetwork(inputNodes, layers);
         }
 
-        public Builder layerFC(int nodeCount) {
+        public Builder layerFC(int nodeCount, Activation activation, Initialisation initialisation) {
             final int edgeCount = layers.isEmpty() ? inputNodes : layers.get(layers.size() - 1).getNodeCount();
-            layers.add(new NNLayer(nodeCount, edgeCount));
+            layers.add(new NNLayer(nodeCount, edgeCount, activation, initialisation));
             return this;
         }
 

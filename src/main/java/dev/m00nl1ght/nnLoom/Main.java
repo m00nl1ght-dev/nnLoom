@@ -15,7 +15,7 @@ public class Main {
     public static void main(String[] args) {
 
         final var initSeed = new Random().nextLong();
-        final var devs = CLDevice.getAvailableDevices(CL_DEVICE_TYPE_GPU);
+        final var devs = CLDevice.getAvailableDevices(CL_DEVICE_TYPE_CPU);
 
         for (CLDevice device : devs) {
 
@@ -29,12 +29,12 @@ public class Main {
             nnPlatform.init();
 
             final var network = NNetwork.builder(2)
-                    .layerFC(4)
-                    .layerFC(1)
+                    .layerFC(10, Activation.Tanh, Initialisation.Xavier)
+                    .layerFC(5, Activation.Tanh, Initialisation.Xavier)
+                    .layerFC(1, Activation.Sigmoid, Initialisation.Uniform)
                     .build();
 
-            final var initRand = new Random(initSeed);
-            network.getLayers().forEach(l -> l.initUniform(initRand, 1f, 1f));
+            network.init(new Random(initSeed));
 
             final var inputs = BufferUtils.createFloatBuffer(8);
             inputs.put(new float[]{0, 0, 1, 0, 0, 1, 1, 1});
@@ -51,7 +51,7 @@ public class Main {
             System.out.println("Result for input 1 0 -> " + results.get());
             System.out.println("Result for input 1 1 -> " + results.get());
 
-            nnPlatform.train(network, 4, inputs, outputs, 1000, 0.5f);
+            nnPlatform.train(network, 4, inputs, outputs, 10000, 0.1f);
 
             final var newResults = nnPlatform.predict(network, 4, inputs);
 
