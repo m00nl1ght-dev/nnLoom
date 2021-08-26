@@ -2,7 +2,6 @@ package dev.m00nl1ght.nnLoom;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 public class NNetwork {
 
@@ -12,12 +11,6 @@ public class NNetwork {
     private NNetwork(int inputCount, List<NNLayer> layers) {
         this.inputCount = inputCount;
         this.layers = List.copyOf(layers);
-    }
-
-    public void init(Random random, float spread) {
-        for (final var layer : layers) {
-            layer.init(random, spread);
-        }
     }
 
     public int getInputCount() {

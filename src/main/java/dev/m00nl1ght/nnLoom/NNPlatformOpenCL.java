@@ -7,6 +7,7 @@ import org.lwjgl.PointerBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 import static dev.m00nl1ght.nnLoom.opencl.CLUtil.*;
@@ -70,15 +71,16 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkBuffer(input, inputCount * network.getInputCount());
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
-        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, l -> l.getNodeCount() * 4);
-        final var bfWeights = createWeightBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR);
+        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
+        final var bfWeights = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
+        final var bfBiases = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
         final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
 
         final var sTime = System.nanoTime();
 
         for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
 
-            feedForward(network, bfInput, inputIdx, bfVals, bfWeights);
+            feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
 
             results.limit(network.getOutputCount() * (inputIdx + 1));
             results.position(network.getOutputCount() * inputIdx);
@@ -93,6 +95,7 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkCLError(clReleaseMemObject(bfInput));
         for (final var bf : bfVals) checkCLError(clReleaseMemObject(bf));
         for (final var bf : bfWeights) checkCLError(clReleaseMemObject(bf));
+        for (final var bf : bfBiases) checkCLError(clReleaseMemObject(bf));
 
         results.clear();
         return results;
@@ -108,20 +111,22 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfTargets = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, targets);
-        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, l -> l.getNodeCount() * 4);
-        final var bfDeltas = createBuffers(network, CL_MEM_READ_WRITE, l -> l.getNodeCount() * 4);
-        final var bfWeights = createWeightBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR);
+        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
+        final var bfDeltas = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
+        final var bfWeights = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
+        final var bfBiases = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
 
         final var sTime = System.nanoTime();
 
         for (int e = 0; e < epochs; e++) {
             for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
 
-                feedForward(network, bfInput, inputIdx, bfVals, bfWeights);
+                feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
 
-                backProp(network, bfInput, bfTargets, inputIdx, bfVals, bfDeltas, bfWeights, learningRate);
+                backProp(network, bfInput, bfTargets, inputIdx, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
 
-                updateWeights(network, bfWeights);
+                updateBuffers(network, bfWeights, NNLayer::getWeights);
+                updateBuffers(network, bfBiases, NNLayer::getBiases);
 
             }
         }
@@ -134,10 +139,11 @@ public class NNPlatformOpenCL implements NNPlatform {
         for (final var bf : bfVals) checkCLError(clReleaseMemObject(bf));
         for (final var bf : bfDeltas) checkCLError(clReleaseMemObject(bf));
         for (final var bf : bfWeights) checkCLError(clReleaseMemObject(bf));
+        for (final var bf : bfBiases) checkCLError(clReleaseMemObject(bf));
 
     }
 
-    private void feedForward(NNetwork network, long bfInput, int inputIdx, long[] bfVals, long[] bfWeights) {
+    private void feedForward(NNetwork network, long bfInput, int inputIdx, long[] bfVals, long[] bfWeights, long[] bfBiases) {
 
         final var layers = network.getLayers();
 
@@ -147,7 +153,7 @@ public class NNPlatformOpenCL implements NNPlatform {
 
             clSetKernelArg1p(clKernelForward, 0, bfVals[layerIdx]);
             clSetKernelArg1p(clKernelForward, 1, bfWeights[layerIdx]);
-            clSetKernelArg1f(clKernelForward, 2, layer.getBias());
+            clSetKernelArg1p(clKernelForward, 2, bfBiases[layerIdx]);
             clSetKernelArg1i(clKernelForward, 3, layer.getEdgeCount());
 
             if (layerIdx == 0) {
@@ -165,7 +171,7 @@ public class NNPlatformOpenCL implements NNPlatform {
     }
 
     private void backProp(NNetwork network, long bfInput, long bfTargets, int inputIdx,
-                          long[] bfVals, long[] bfDeltas, long[] bfWeights, float learningRate) {
+                          long[] bfVals, long[] bfDeltas, long[] bfWeights, long[] bfBiases, float learningRate) {
 
         final var layers = network.getLayers();
         final var outputLayerIdx = layers.size() - 1;
@@ -175,19 +181,20 @@ public class NNPlatformOpenCL implements NNPlatform {
         clSetKernelArg1p(clKernelBackO, 1, bfVals[outputLayerIdx]);
         clSetKernelArg1p(clKernelBackO, 2, bfDeltas[outputLayerIdx]);
         clSetKernelArg1p(clKernelBackO, 3, bfWeights[outputLayerIdx]);
-        clSetKernelArg1i(clKernelBackO, 4, outputLayer.getEdgeCount());
+        clSetKernelArg1p(clKernelBackO, 4, bfBiases[outputLayerIdx]);
+        clSetKernelArg1i(clKernelBackO, 5, outputLayer.getEdgeCount());
 
         if (outputLayerIdx == 0) {
-            clSetKernelArg1i(clKernelBackO, 5, inputIdx * network.getInputCount());
-            clSetKernelArg1p(clKernelBackO, 6, bfInput);
+            clSetKernelArg1i(clKernelBackO, 6, inputIdx * network.getInputCount());
+            clSetKernelArg1p(clKernelBackO, 7, bfInput);
         } else {
-            clSetKernelArg1i(clKernelBackO, 5, 0);
-            clSetKernelArg1p(clKernelBackO, 6, bfVals[outputLayerIdx - 1]);
+            clSetKernelArg1i(clKernelBackO, 6, 0);
+            clSetKernelArg1p(clKernelBackO, 7, bfVals[outputLayerIdx - 1]);
         }
 
-        clSetKernelArg1i(clKernelBackO, 7, inputIdx * outputLayer.getNodeCount());
-        clSetKernelArg1p(clKernelBackO, 8, bfTargets);
-        clSetKernelArg1f(clKernelBackO, 9, learningRate);
+        clSetKernelArg1i(clKernelBackO, 8, inputIdx * outputLayer.getNodeCount());
+        clSetKernelArg1p(clKernelBackO, 9, bfTargets);
+        clSetKernelArg1f(clKernelBackO, 10, learningRate);
 
         runKernel(clKernelBackO, outputLayer.getNodeCount());
 
@@ -199,20 +206,21 @@ public class NNPlatformOpenCL implements NNPlatform {
             clSetKernelArg1p(clKernelBackH, 1, bfVals[layerIdx]);
             clSetKernelArg1p(clKernelBackH, 2, bfDeltas[layerIdx]);
             clSetKernelArg1p(clKernelBackH, 3, bfWeights[layerIdx]);
-            clSetKernelArg1i(clKernelBackH, 4, layers.get(layerIdx + 1).getNodeCount());
-            clSetKernelArg1p(clKernelBackH, 5, bfDeltas[layerIdx + 1]);
-            clSetKernelArg1p(clKernelBackH, 6, bfWeights[layerIdx + 1]);
-            clSetKernelArg1i(clKernelBackH, 7, layer.getEdgeCount());
+            clSetKernelArg1p(clKernelBackH, 4, bfBiases[layerIdx]);
+            clSetKernelArg1i(clKernelBackH, 5, layers.get(layerIdx + 1).getNodeCount());
+            clSetKernelArg1p(clKernelBackH, 6, bfDeltas[layerIdx + 1]);
+            clSetKernelArg1p(clKernelBackH, 7, bfWeights[layerIdx + 1]);
+            clSetKernelArg1i(clKernelBackH, 8, layer.getEdgeCount());
 
             if (layerIdx == 0) {
-                clSetKernelArg1i(clKernelBackH, 8, inputIdx * network.getInputCount());
-                clSetKernelArg1p(clKernelBackH, 9, bfInput);
+                clSetKernelArg1i(clKernelBackH, 9, inputIdx * network.getInputCount());
+                clSetKernelArg1p(clKernelBackH, 10, bfInput);
             } else {
-                clSetKernelArg1i(clKernelBackH, 8, 0);
-                clSetKernelArg1p(clKernelBackH, 9, bfVals[layerIdx - 1]);
+                clSetKernelArg1i(clKernelBackH, 9, 0);
+                clSetKernelArg1p(clKernelBackH, 10, bfVals[layerIdx - 1]);
             }
 
-            clSetKernelArg1f(clKernelBackH, 10, learningRate);
+            clSetKernelArg1f(clKernelBackH, 11, learningRate);
 
             runKernel(clKernelBackH, layer.getNodeCount());
 
@@ -236,29 +244,29 @@ public class NNPlatformOpenCL implements NNPlatform {
         final var buffers = new long[network.getLayers().size()];
         final var layers = network.getLayers();
         for (int i = 0; i < layers.size(); i++) {
-            buffers[i] = clCreateBuffer(clContext.get(), flags, size.applyAsInt(layers.get(i)), errBuffer);
+            buffers[i] = clCreateBuffer(clContext.get(), flags, size.applyAsInt(layers.get(i)) * 4, errBuffer);
             checkCLError(errBuffer);
         }
         return buffers;
     }
 
-    private long[] createWeightBuffers(NNetwork network, long flags) {
+    private long[] createBuffers(NNetwork network, long flags, Function<NNLayer, FloatBuffer> bf) {
         final var buffers = new long[network.getLayers().size()];
         final var layers = network.getLayers();
         for (int i = 0; i < layers.size(); i++) {
-            buffers[i] = clCreateBuffer(clContext.get(), flags, layers.get(i).getWeights(), errBuffer);
+            buffers[i] = clCreateBuffer(clContext.get(), flags, bf.apply(layers.get(i)), errBuffer);
             checkCLError(errBuffer);
         }
         return buffers;
     }
 
-    private void updateWeights(NNetwork network, long[] bfWeights) {
+    private void updateBuffers(NNetwork network, long[] src, Function<NNLayer, FloatBuffer> bf) {
         final var layers = network.getLayers();
         for (int i = 0; i < layers.size(); i++) {
-            final var weights = layers.get(i).getWeights();
-            weights.clear();
-            checkCLError(clEnqueueReadBuffer(clCommandQueue, bfWeights[i], true, 0, weights, null, null));
-            weights.clear();
+            final var buffer = bf.apply(layers.get(i));
+            buffer.clear();
+            checkCLError(clEnqueueReadBuffer(clCommandQueue, src[i], true, 0, buffer, null, null));
+            buffer.clear();
         }
     }
 

@@ -3,7 +3,7 @@ kernel void forward
 (
     global float* cVals,                // output values of current layer
     global const float* cWeights,       // weights of current layer
-    const float cBias,                  // bias applied to current layer
+    global const float* cBiases,        // biases of current layer
     const int pSize,                    // number of nodes in previous layer
     const int pOffset,                  // offset for nodes in previous layer
     global const float* pVals           // output values from previous layer
@@ -11,8 +11,7 @@ kernel void forward
 {
     const int i = get_global_id(0);
 
-    float v = cBias;
-
+    float v = cBiases[i];
     for (int p = 0; p < pSize; p++) {
         v += pVals[p + pOffset] * cWeights[i * pSize + p];
     }
@@ -26,6 +25,7 @@ kernel void backH
     global const float* cVals,          // values for current layer
     global float* cDeltas,              // delta values for current layer
     global float* cWeights,             // weights for current layer
+    global float* cBiases,              // biases for current layer
     const int nSize,                    // number of nodes in next layer
     global const float* nDeltas,        // delta values for next layer
     global const float* nWeights,       // weights for next layer
@@ -36,18 +36,20 @@ kernel void backH
 )
 {
     const int i = get_global_id(0);
+    const float v = cVals[i];
 
-    float delta = 0;
-
+    float error = 0;
     for (int n = 0; n < nSize; n++) {
-        delta += nDeltas[n] * nWeights[n * nSize + i];
+        error += nDeltas[n] * nWeights[n * nSize + i];
     }
 
-    delta *= ( cVals[i] * ( 1 - cVals[i] ) );
+    const float delta = error * ( v * ( 1 - v ) );
+
     cDeltas[i] = delta;
+    cBiases[i] += delta * lr;
 
     for (int p = 0; p < pSize; p++) {
-        cWeights[i * pSize + p] -= lr * delta * pVals[p + pOffset];
+        cWeights[i * pSize + p] += lr * delta * pVals[p + pOffset];
     }
 }
 
@@ -57,6 +59,7 @@ kernel void backO
     global const float* cVals,          // values for current layer
     global float* cDeltas,              // delta values for current layer
     global float* cWeights,             // weights for current layer
+    global float* cBiases,              // biases for current layer
     const int pSize,                    // number of nodes in previous layer
     const int pOffset,                  // offset for nodes in previous layer
     global const float* pVals,          // values for previous layer
@@ -66,11 +69,16 @@ kernel void backO
 )
 {
     const int i = get_global_id(0);
+    const float v = cVals[i];
 
-    float delta = (cVals[i] - tVals[i + tOffset]) * ( cVals[i] * ( 1 - cVals[i] ) );
+    const float error = tVals[i + tOffset] - v;
+    const float delta = error * ( v * ( 1 - v ) );
+
     cDeltas[i] = delta;
+    cBiases[i] += delta * lr;
 
     for (int p = 0; p < pSize; p++) {
-        cWeights[i * pSize + p] -= lr * delta * pVals[p + pOffset];
+        cWeights[i * pSize + p] += lr * delta * pVals[p + pOffset];
     }
+
 }
