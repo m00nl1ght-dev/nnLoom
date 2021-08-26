@@ -4,6 +4,8 @@ import dev.m00nl1ght.nnLoom.opencl.CLContext;
 import dev.m00nl1ght.nnLoom.opencl.CLDevice;
 import org.lwjgl.BufferUtils;
 
+import java.util.Random;
+
 import static org.lwjgl.opencl.CL10.*;
 
 public class Main {
@@ -12,6 +14,7 @@ public class Main {
 
     public static void main(String[] args) {
 
+        final var initSeed = new Random().nextLong();
         final var devs = CLDevice.getAvailableDevices(CL_DEVICE_TYPE_ALL);
 
         for (CLDevice device : devs) {
@@ -21,13 +24,6 @@ public class Main {
 
             final var context = CLContext.create(device);
 
-            final var testPlatform = new NNPlatformTesting(context);
-            testPlatform.init();
-
-            testPlatform.test();
-
-            testPlatform.dispose();
-
             final var nnPlatform = new NNPlatformOpenCL(context);
             nnPlatform.init();
 
@@ -36,8 +32,10 @@ public class Main {
                     .layerFC(1)
                     .build();
 
+            final var initRand = new Random(initSeed);
+
             network.getLayers().forEach(l -> l.setBias(0f));
-            network.init(1f);
+            network.init(initRand, 1f);
 
             final var inputs = BufferUtils.createFloatBuffer(8);
             inputs.put(new float[]{0, 0, 1, 0, 0, 1, 1, 1});

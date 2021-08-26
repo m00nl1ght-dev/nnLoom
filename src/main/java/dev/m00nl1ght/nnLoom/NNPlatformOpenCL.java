@@ -78,7 +78,7 @@ public class NNPlatformOpenCL implements NNPlatform {
 
             feedForward(network, bfInput, inputIdx, bfVals, bfWeights);
 
-            results.limit(network.getOutputCount() * (inputIdx + 1) - 1);
+            results.limit(network.getOutputCount() * (inputIdx + 1));
             results.position(network.getOutputCount() * inputIdx);
             final var bfResult = bfVals[network.getLayers().size() - 1];
             clEnqueueReadBuffer(clCommandQueue, bfResult, true, 0, results, null, null);
