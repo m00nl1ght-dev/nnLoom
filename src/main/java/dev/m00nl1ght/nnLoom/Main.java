@@ -19,6 +19,7 @@ public class Main {
 
         for (CLDevice device : devs) {
 
+            System.out.println("--------------------------------------------------------------");
             System.out.println("Platform name: " + device.getPlatformInfo(CL_PLATFORM_NAME));
             System.out.println("Device name: " + device.getDeviceInfo(CL_DEVICE_NAME));
 
@@ -45,15 +46,26 @@ public class Main {
             outputs.put(new float[]{0, 1, 1, 0});
             outputs.clear();
 
-            final var results = nnPlatform.predict(network, inputs, 4);
+            final var results = nnPlatform.predict(network, 4, inputs);
 
             System.out.println("Result for input 0 0 -> " + results.get());
             System.out.println("Result for input 0 1 -> " + results.get());
             System.out.println("Result for input 1 0 -> " + results.get());
             System.out.println("Result for input 1 1 -> " + results.get());
 
+            nnPlatform.train(network, 4, inputs, outputs, 1000, 0.005f);
+
+            final var newResults = nnPlatform.predict(network, 4, inputs);
+
+            System.out.println("New result for input 0 0 -> " + newResults.get());
+            System.out.println("New result for input 0 1 -> " + newResults.get());
+            System.out.println("New result for input 1 0 -> " + newResults.get());
+            System.out.println("New result for input 1 1 -> " + newResults.get());
+
             nnPlatform.dispose();
             CLContext.release();
+
+            //break;
 
         }
 

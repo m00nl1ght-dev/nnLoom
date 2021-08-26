@@ -6,9 +6,9 @@ public interface NNPlatform {
 
     void init();
 
-    FloatBuffer predict(NNetwork network, FloatBuffer input, int inputCount);
+    FloatBuffer predict(NNetwork network, int inputCount, FloatBuffer input);
 
-    void train(NNetwork network, FloatBuffer input, int inputCount, int epochs);
+    void train(NNetwork network, int inputCount, FloatBuffer input, FloatBuffer targets, int epochs, float learningRate);
 
     void dispose();
 
