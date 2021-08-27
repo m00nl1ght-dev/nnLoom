@@ -85,7 +85,7 @@ public class NNPlatformOpenCL implements NNPlatform {
         final var bfBiases = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
         final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
 
-        final var sTime = System.nanoTime();
+        final var sTime = System.currentTimeMillis();
 
         for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
 
@@ -98,8 +98,8 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         }
 
-        final var eTime = System.nanoTime();
-        System.out.println("Predicted for " + inputCount + " data sets in " + (eTime - sTime) + " nanos.");
+        final var eTime = System.currentTimeMillis();
+        System.out.println("Predicted for " + inputCount + " data sets in " + (eTime - sTime) + " ms.");
 
         checkCLError(clReleaseMemObject(bfInput));
         for (final var bf : bfVals) checkCLError(clReleaseMemObject(bf));
@@ -294,9 +294,43 @@ public class NNPlatformOpenCL implements NNPlatform {
     }
 
     private void checkBuffer(FloatBuffer buffer, int expectedSize) {
-        if (buffer.remaining() != expectedSize) {
+        if (buffer.remaining() < expectedSize) {
             throw new IllegalArgumentException("Remaining data in buffer not as expected ("
                     + buffer.remaining() + " != " + expectedSize + ")");
+        }
+    }
+
+    @Override
+    public float eval(FloatBuffer predicted, FloatBuffer targets, ErrorFunction function, int outputCount, int sampleCount) {
+        switch (function) {
+
+            case ME -> {
+                var sum = 0f;
+
+                for (int i = 0; i < sampleCount; i++) {
+                    for (int j = 0; j < outputCount; j++) {
+                        sum += Math.abs(targets.get() - predicted.get());
+                    }
+                }
+
+                return sum / sampleCount;
+            }
+
+            case MSE -> {
+                var sum = 0f;
+
+                for (int i = 0; i < sampleCount; i++) {
+                    for (int j = 0; j < outputCount; j++) {
+                        final var diff = targets.get() - predicted.get();
+                        sum += diff * diff;
+                    }
+                }
+
+                return sum / sampleCount;
+            }
+
+            default -> throw new RuntimeException();
+
         }
     }
 

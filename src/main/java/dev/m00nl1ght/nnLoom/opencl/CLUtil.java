@@ -1,7 +1,5 @@
 package dev.m00nl1ght.nnLoom.opencl;
 
-// Source: https://github.com/LWJGL/lwjgl3/blob/master/modules/samples/src/test/java/org/lwjgl/demo/opencl/InfoUtil.java
-
 /*
  * Copyright LWJGL. All rights reserved.
  * License terms: https://www.lwjgl.org/license
@@ -24,7 +22,11 @@ import static org.lwjgl.opencl.CL10.*;
 import static org.lwjgl.system.MemoryStack.*;
 import static org.lwjgl.system.MemoryUtil.*;
 
-/** OpenCL object info utilities. */
+/**
+ * Modified version of LWJGL's OpenCL utils.
+ * Original taken from:
+ * https://github.com/LWJGL/lwjgl3/blob/master/modules/samples/src/test/java/org/lwjgl/demo/opencl/InfoUtil.java
+ */
 public final class CLUtil {
 
     private CLUtil() {

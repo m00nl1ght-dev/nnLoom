@@ -10,6 +10,8 @@ public interface NNPlatform {
 
     void train(NNetwork network, int inputCount, FloatBuffer input, FloatBuffer targets, int epochs, float learningRate);
 
+    float eval(FloatBuffer predicted, FloatBuffer targets, ErrorFunction function, int outputCount, int sampleCount);
+
     void dispose();
 
 }
