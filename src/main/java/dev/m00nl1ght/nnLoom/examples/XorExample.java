@@ -30,16 +30,16 @@ public class XorExample {
         outputs.put(new float[]{0, 1, 1, 0});
         outputs.clear();
 
-        final var results = nnPlatform.predict(network, 4, inputs);
+        final var results = nnPlatform.predict(network, 4, inputs, -1);
 
         System.out.println("Result for input 0 0 -> " + results.get());
         System.out.println("Result for input 0 1 -> " + results.get());
         System.out.println("Result for input 1 0 -> " + results.get());
         System.out.println("Result for input 1 1 -> " + results.get());
 
-        nnPlatform.train(network, 4, inputs, outputs, 10000, 0.1f);
+        nnPlatform.train(network, 4, inputs, outputs, 10000, -1, 0.1f);
 
-        final var newResults = nnPlatform.predict(network, 4, inputs);
+        final var newResults = nnPlatform.predict(network, 4, inputs, -1);
 
         System.out.println("New result for input 0 0 -> " + newResults.get());
         System.out.println("New result for input 0 1 -> " + newResults.get());

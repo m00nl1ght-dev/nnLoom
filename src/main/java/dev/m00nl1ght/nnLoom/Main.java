@@ -4,8 +4,6 @@ import dev.m00nl1ght.nnLoom.examples.MnistExample;
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
 import dev.m00nl1ght.nnLoom.opencl.CLDevice;
 
-import java.util.Random;
-
 import static org.lwjgl.opencl.CL10.*;
 
 public class Main {
@@ -25,7 +23,7 @@ public class Main {
 
             final var context = CLContext.create(device);
 
-            final var nnPlatform = new NNPlatformOpenCL(context);
+            final var nnPlatform = new NNPlatformOpenCL2d(context);
             nnPlatform.init();
 
             // XorExample.run(nnPlatform, initSeed);

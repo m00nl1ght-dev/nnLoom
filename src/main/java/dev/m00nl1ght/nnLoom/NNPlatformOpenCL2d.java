@@ -14,7 +14,7 @@ import static dev.m00nl1ght.nnLoom.opencl.CLUtil.*;
 import static org.lwjgl.opencl.CL10.*;
 import static org.lwjgl.system.MemoryUtil.*;
 
-public class NNPlatformOpenCL implements NNPlatform {
+public class NNPlatformOpenCL2d implements NNPlatform {
 
     private final CLContext clContext;
     private final IntBuffer errBuffer;
@@ -25,11 +25,12 @@ public class NNPlatformOpenCL implements NNPlatform {
     private long[] clKernelForward;
     private long[] clKernelBackH;
     private long[] clKernelBackO;
+    private long clKernelApplyDeltas;
 
-    public NNPlatformOpenCL(CLContext clContext) {
+    public NNPlatformOpenCL2d(CLContext clContext) {
         this.clContext = Objects.requireNonNull(clContext);
         this.errBuffer = BufferUtils.createIntBuffer(1);
-        this.workSize = BufferUtils.createPointerBuffer(1);
+        this.workSize = BufferUtils.createPointerBuffer(2);
     }
 
     @Override
@@ -40,7 +41,7 @@ public class NNPlatformOpenCL implements NNPlatform {
         clCommandQueue = clCreateCommandQueue(clContext.get(), clContext.dev(), NULL, errBuffer);
         checkCLError(errBuffer);
 
-        final var source = ioResourceToByteBuffer("nnPlatform.cl", 1024);
+        final var source = ioResourceToByteBuffer("nnPlatform2d.cl", 1024);
 
         final var strings = BufferUtils.createPointerBuffer(1);
         final var lengths = BufferUtils.createPointerBuffer(1);
@@ -52,6 +53,9 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkCLError(errBuffer);
 
         checkCLError(clBuildProgram(clProgram, clContext.dev(), "", null, NULL));
+
+        clKernelApplyDeltas = clCreateKernel(clProgram, "applyDeltas", errBuffer);
+        checkCLError(errBuffer);
 
         final var actCount = Activation.values().length;
         clKernelForward = new long[actCount];
@@ -78,23 +82,32 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         checkContext(true);
         checkBuffer(input, inputCount * network.getInputCount());
+        if (batchSize < 0) batchSize = inputCount;
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
-        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
+        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount, batchSize);
         final var bfWeights = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
         final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
 
         final var sTime = System.currentTimeMillis();
 
-        for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
+        var bNum = 0;
+        var bRemaining = inputCount;
+        while (bRemaining > 0) {
 
-            feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
+            final var bSize = Math.min(batchSize, bRemaining);
+            final var bOffset = bNum * batchSize;
 
-            results.limit(network.getOutputCount() * (inputIdx + 1));
-            results.position(network.getOutputCount() * inputIdx);
+            feedForward(network, bfInput, bOffset, bSize, bfVals, bfWeights, bfBiases);
+
+            results.limit(network.getOutputCount() * (bOffset + bSize));
+            results.position(network.getOutputCount() * bOffset);
             final var bfResult = bfVals[network.getLayers().size() - 1];
             checkCLError(clEnqueueReadBuffer(clCommandQueue, bfResult, true, 0, results, null, null));
+
+            bRemaining -= bSize;
+            bNum++;
 
         }
 
@@ -117,24 +130,34 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkContext(true);
         checkBuffer(input, inputCount * network.getInputCount());
         checkBuffer(targets, inputCount * network.getOutputCount());
+        if (batchSize < 0) batchSize = inputCount;
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfTargets = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, targets);
-        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
-        final var bfDeltas = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
+        final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount, batchSize);
+        final var bfDeltas = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount, batchSize);
         final var bfWeights = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
 
         final var sTime = System.currentTimeMillis();
 
         for (int e = 0; e < epochs; e++) {
-            for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
 
-                feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
+            var bNum = 0;
+            var bRemaining = inputCount;
+            while (bRemaining > 0) {
 
-                backProp(network, bfInput, bfTargets, inputIdx, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
+                final var bSize = Math.min(batchSize, bRemaining);
+                final var bOffset = bNum * batchSize;
+
+                feedForward(network, bfInput, bOffset, bSize, bfVals, bfWeights, bfBiases);
+                backProp(network, bfInput, bfTargets, bOffset, bSize, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
+
+                bRemaining -= bSize;
+                bNum++;
 
             }
+
         }
 
         final var eTime = System.currentTimeMillis();
@@ -152,7 +175,7 @@ public class NNPlatformOpenCL implements NNPlatform {
 
     }
 
-    private void feedForward(NNetwork network, long bfInput, int inputIdx, long[] bfVals, long[] bfWeights, long[] bfBiases) {
+    private void feedForward(NNetwork network, long bfInput, int offset, int size, long[] bfVals, long[] bfWeights, long[] bfBiases) {
 
         final var layers = network.getLayers();
 
@@ -161,26 +184,27 @@ public class NNPlatformOpenCL implements NNPlatform {
             final var layer = layers.get(layerIdx);
             final var kern = clKernelForward[layer.getActivation().ordinal()];
 
-            clSetKernelArg1p(kern, 0, bfVals[layerIdx]);
-            clSetKernelArg1p(kern, 1, bfWeights[layerIdx]);
-            clSetKernelArg1p(kern, 2, bfBiases[layerIdx]);
-            clSetKernelArg1i(kern, 3, layer.getEdgeCount());
+            clSetKernelArg1i(kern, 0, layer.getNodeCount());
+            clSetKernelArg1p(kern, 1, bfVals[layerIdx]);
+            clSetKernelArg1p(kern, 2, bfWeights[layerIdx]);
+            clSetKernelArg1p(kern, 3, bfBiases[layerIdx]);
+            clSetKernelArg1i(kern, 4, layer.getEdgeCount());
 
             if (layerIdx == 0) {
-                clSetKernelArg1i(kern, 4, inputIdx * network.getInputCount());
-                clSetKernelArg1p(kern, 5, bfInput);
+                clSetKernelArg1i(kern, 5, offset * network.getInputCount());
+                clSetKernelArg1p(kern, 6, bfInput);
             } else {
-                clSetKernelArg1i(kern, 4, 0);
-                clSetKernelArg1p(kern, 5, bfVals[layerIdx - 1]);
+                clSetKernelArg1i(kern, 5, 0);
+                clSetKernelArg1p(kern, 6, bfVals[layerIdx - 1]);
             }
 
-            runKernel(kern, layer.getNodeCount());
+            runKernel(kern, layer.getNodeCount(), size);
 
         }
 
     }
 
-    private void backProp(NNetwork network, long bfInput, long bfTargets, int inputIdx,
+    private void backProp(NNetwork network, long bfInput, long bfTargets, int offset, int size,
                           long[] bfVals, long[] bfDeltas, long[] bfWeights, long[] bfBiases, float learningRate) {
 
         final var layers = network.getLayers();
@@ -191,23 +215,10 @@ public class NNPlatformOpenCL implements NNPlatform {
         clSetKernelArg1i(kernO, 0, outputLayer.getNodeCount());
         clSetKernelArg1p(kernO, 1, bfVals[outputLayerIdx]);
         clSetKernelArg1p(kernO, 2, bfDeltas[outputLayerIdx]);
-        clSetKernelArg1p(kernO, 3, bfWeights[outputLayerIdx]);
-        clSetKernelArg1p(kernO, 4, bfBiases[outputLayerIdx]);
-        clSetKernelArg1i(kernO, 5, outputLayer.getEdgeCount());
+        clSetKernelArg1i(kernO, 3, offset * outputLayer.getNodeCount());
+        clSetKernelArg1p(kernO, 4, bfTargets);
 
-        if (outputLayerIdx == 0) {
-            clSetKernelArg1i(kernO, 6, inputIdx * network.getInputCount());
-            clSetKernelArg1p(kernO, 7, bfInput);
-        } else {
-            clSetKernelArg1i(kernO, 6, 0);
-            clSetKernelArg1p(kernO, 7, bfVals[outputLayerIdx - 1]);
-        }
-
-        clSetKernelArg1i(kernO, 8, inputIdx * outputLayer.getNodeCount());
-        clSetKernelArg1p(kernO, 9, bfTargets);
-        clSetKernelArg1f(kernO, 10, learningRate);
-
-        runKernel(kernO, outputLayer.getNodeCount());
+        runKernel(kernO, outputLayer.getNodeCount(), size);
 
         for (int layerIdx = outputLayerIdx - 1; layerIdx >= 0; layerIdx--) {
 
@@ -217,24 +228,36 @@ public class NNPlatformOpenCL implements NNPlatform {
             clSetKernelArg1i(kern, 0, layer.getNodeCount());
             clSetKernelArg1p(kern, 1, bfVals[layerIdx]);
             clSetKernelArg1p(kern, 2, bfDeltas[layerIdx]);
-            clSetKernelArg1p(kern, 3, bfWeights[layerIdx]);
-            clSetKernelArg1p(kern, 4, bfBiases[layerIdx]);
-            clSetKernelArg1i(kern, 5, layers.get(layerIdx + 1).getNodeCount());
-            clSetKernelArg1p(kern, 6, bfDeltas[layerIdx + 1]);
-            clSetKernelArg1p(kern, 7, bfWeights[layerIdx + 1]);
-            clSetKernelArg1i(kern, 8, layer.getEdgeCount());
+            clSetKernelArg1i(kern, 3, layers.get(layerIdx + 1).getNodeCount());
+            clSetKernelArg1p(kern, 4, bfDeltas[layerIdx + 1]);
+            clSetKernelArg1p(kern, 5, bfWeights[layerIdx + 1]);
+
+            runKernel(kern, layer.getNodeCount(), size);
+
+        }
+
+        for (int layerIdx = outputLayerIdx; layerIdx >= 0; layerIdx--) {
+
+            final var layer = layers.get(layerIdx);
+
+            clSetKernelArg1i(clKernelApplyDeltas, 0, layer.getNodeCount());
+            clSetKernelArg1p(clKernelApplyDeltas, 1, bfVals[layerIdx]);
+            clSetKernelArg1p(clKernelApplyDeltas, 2, bfDeltas[layerIdx]);
+            clSetKernelArg1p(clKernelApplyDeltas, 3, bfWeights[layerIdx]);
+            clSetKernelArg1p(clKernelApplyDeltas, 4, bfBiases[layerIdx]);
+            clSetKernelArg1i(clKernelApplyDeltas, 5, layer.getEdgeCount());
 
             if (layerIdx == 0) {
-                clSetKernelArg1i(kern, 9, inputIdx * network.getInputCount());
-                clSetKernelArg1p(kern, 10, bfInput);
+                clSetKernelArg1i(clKernelApplyDeltas, 6, offset * network.getInputCount());
+                clSetKernelArg1p(clKernelApplyDeltas, 7, bfInput);
             } else {
-                clSetKernelArg1i(kern, 9, 0);
-                clSetKernelArg1p(kern, 10, bfVals[layerIdx - 1]);
+                clSetKernelArg1i(clKernelApplyDeltas, 6, 0);
+                clSetKernelArg1p(clKernelApplyDeltas, 7, bfVals[layerIdx - 1]);
             }
 
-            clSetKernelArg1f(kern, 11, learningRate);
+            clSetKernelArg1f(clKernelApplyDeltas, 8, learningRate);
 
-            runKernel(kern, layer.getNodeCount());
+            runKernel(clKernelApplyDeltas, layer.getNodeCount(), size);
 
         }
 
@@ -252,11 +275,11 @@ public class NNPlatformOpenCL implements NNPlatform {
         return buffer;
     }
 
-    private long[] createBuffers(NNetwork network, long flags, ToIntFunction<NNLayer> size) {
+    private long[] createBuffers(NNetwork network, long flags, ToIntFunction<NNLayer> size, int sizeMul) {
         final var buffers = new long[network.getLayers().size()];
         final var layers = network.getLayers();
         for (int i = 0; i < layers.size(); i++) {
-            buffers[i] = clCreateBuffer(clContext.get(), flags, size.applyAsInt(layers.get(i)) * 4, errBuffer);
+            buffers[i] = clCreateBuffer(clContext.get(), flags, size.applyAsInt(layers.get(i)) * 4 * sizeMul, errBuffer);
             checkCLError(errBuffer);
         }
         return buffers;
@@ -282,9 +305,10 @@ public class NNPlatformOpenCL implements NNPlatform {
         }
     }
 
-    private void runKernel(long clKernel, int itemCount) {
-        workSize.put(0, itemCount);
-        checkCLError(clEnqueueNDRangeKernel(clCommandQueue, clKernel, 1, null, workSize, null, null, null));
+    private void runKernel(long clKernel, int itemCount0, int itemCount1) {
+        workSize.put(0, itemCount0);
+        workSize.put(1, itemCount1);
+        checkCLError(clEnqueueNDRangeKernel(clCommandQueue, clKernel, 2, null, workSize, null, null, null));
         checkCLError(clFinish(clCommandQueue));
     }
 
@@ -343,6 +367,7 @@ public class NNPlatformOpenCL implements NNPlatform {
         for (long k : clKernelForward) checkCLError(clReleaseKernel(k));
         for (long k : clKernelBackH) checkCLError(clReleaseKernel(k));
         for (long k : clKernelBackO) checkCLError(clReleaseKernel(k));
+        checkCLError(clReleaseKernel(clKernelApplyDeltas));
         checkCLError(clReleaseProgram(clProgram));
 
         clCommandQueue = -1;

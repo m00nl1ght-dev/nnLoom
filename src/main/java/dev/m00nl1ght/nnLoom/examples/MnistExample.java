@@ -40,16 +40,16 @@ public class MnistExample {
 
         eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 0);
 
-        nnPlatform.train(network, MNIST_SIZE_TR, dataTr, labelsTr, 3, 0.01f);
+        nnPlatform.train(network, MNIST_SIZE_TR, dataTr, labelsTr, 3, 100, 0.01f);
 
-        eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 5);
+        eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 0);
 
     }
 
     private static void eval(NNPlatform nnPlatform, NNetwork network, FloatBuffer data, FloatBuffer labels, int count, int incEx) {
         data.clear(); labels.clear();
 
-        final var results = nnPlatform.predict(network, count, data);
+        final var results = nnPlatform.predict(network, count, data, -1);
         final var error = nnPlatform.eval(results, labels, ErrorFunction.MSE, MNIST_CAT, count);
         results.clear(); labels.clear();
 
