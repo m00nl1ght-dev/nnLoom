@@ -129,11 +129,8 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         for (int e = 0; e < epochs; e++) {
             for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
-
                 feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
-
                 backProp(network, bfInput, bfTargets, inputIdx, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
-
             }
         }
 
