@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'application'
 }
 
 project.ext.lwjglVersion = "3.2.3"
@@ -8,6 +9,8 @@ project.ext.lwjglNatives = "natives-windows"
 
 group 'dev.m00nl1ght'
 version '0.1'
+
+mainClassName = 'dev.m00nl1ght.nnLoom.Main'
 
 repositories {
     mavenCentral()
