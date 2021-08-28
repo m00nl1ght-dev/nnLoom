@@ -30,19 +30,28 @@ public class MnistExample {
                 .layerFC(MNIST_CAT, Activation.Sigmoid, Initialisation.Uniform)
                 .build();
 
+        System.out.println("Initialising network with seed " + initSeed + " ...");
         network.init(new Random(initSeed));
 
+        System.out.println("Loading MNIST ...");
         final var cl = MnistExample.class.getClassLoader();
         final var dataTr = MnistReader.readData(cl.getResourceAsStream(RES_DATA_TR));
         final var labelsTr = MnistReader.readLabels(cl.getResourceAsStream(RES_LABELS_TR));
         final var dataTe = MnistReader.readData(cl.getResourceAsStream(RES_DATA_TE));
         final var labelsTe = MnistReader.readLabels(cl.getResourceAsStream(RES_LABELS_TE));
 
+        System.out.println("Evaluating network ...");
         eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 0);
 
-        nnPlatform.train(network, MNIST_SIZE_TR, dataTr, labelsTr, 3, 100, 0.01f);
+        System.out.println("--------------------------------------------------------------");
 
+        System.out.println("Training network ...");
+        nnPlatform.train(network, MNIST_SIZE_TR, dataTr, labelsTr, 5, 100, 0.01f);
+
+        System.out.println("Evaluating network ...");
         eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 0);
+
+        System.out.println("--------------------------------------------------------------");
 
     }
 
@@ -65,12 +74,12 @@ public class MnistExample {
         }
 
         final float incP = 100f * incorrect.size() / count;
-        System.out.printf("Incorrect predictions in total: " + incorrect.size() + " (%.2f %%)%n", incP);
+        System.out.printf("Accuracy is now: %.2f %% %n", 100 - incP);
+        System.out.printf("MSE is now: %.3f%n", error);
+
         if (incEx > 0) for (int i = 0; i < MNIST_CAT; i++) {
             System.out.println("Incorrect predictions in category " + i + ": " + incDist[i]);
         }
-
-        System.out.printf("MSE is now: %.3f%n", error);
 
         Collections.shuffle(incorrect);
         if (incEx > 0 && !incorrect.isEmpty()) {

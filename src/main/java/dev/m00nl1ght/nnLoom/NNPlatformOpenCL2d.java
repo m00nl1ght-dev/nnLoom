@@ -6,9 +6,14 @@ import org.lwjgl.PointerBuffer;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static dev.m00nl1ght.nnLoom.opencl.CLUtil.*;
 import static org.lwjgl.opencl.CL10.*;
@@ -131,6 +136,8 @@ public class NNPlatformOpenCL2d implements NNPlatform {
         checkBuffer(input, inputCount * network.getInputCount());
         checkBuffer(targets, inputCount * network.getOutputCount());
         if (batchSize < 0) batchSize = inputCount;
+
+        // shuffleBuffers(network, inputCount, input, targets);
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfTargets = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, targets);
@@ -260,6 +267,38 @@ public class NNPlatformOpenCL2d implements NNPlatform {
             runKernel(clKernelApplyDeltas, layer.getNodeCount(), size);
 
         }
+
+    }
+
+    private void shuffleBuffers(NNetwork network, int items, FloatBuffer dInputs, FloatBuffer dTargets) {
+
+        final var order = IntStream.range(0, items).boxed()
+                .collect(Collectors.toCollection(() -> new ArrayList<>(items)));
+
+        Collections.shuffle(order);
+
+        dInputs.mark();
+        dTargets.mark();
+
+        final var si = network.getInputCount();
+        final var so = network.getOutputCount();
+        final var sInputs = BufferUtils.createFloatBuffer(dInputs.remaining());
+        final var sTargets = BufferUtils.createFloatBuffer(dTargets.remaining());
+        sInputs.put(dInputs.asReadOnlyBuffer());
+        sTargets.put(dTargets.asReadOnlyBuffer());
+        sInputs.clear(); sTargets.clear();
+
+        for (int i = 0; i < items; i++) {
+            final var idx = order.get(i);
+            for (int j = 0; j < si; j++) dInputs.put(sInputs.get());
+            for (int j = 0; j < so; j++) dTargets.put(sTargets.get());
+        }
+
+        if (Stream.of(sInputs, sTargets, dInputs, dTargets).anyMatch(floatBuffer -> floatBuffer.remaining() > 0))
+            throw new IllegalStateException();
+
+        dInputs.reset();
+        dTargets.reset();
 
     }
 
