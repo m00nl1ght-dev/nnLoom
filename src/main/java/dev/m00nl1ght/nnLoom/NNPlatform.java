@@ -1,8 +1,11 @@
 package dev.m00nl1ght.nnLoom;
 
+import dev.m00nl1ght.nnLoom.profiler.Profilable;
+import dev.m00nl1ght.nnLoom.profiler.impl.SimpleProfilerGroup;
+
 import java.nio.FloatBuffer;
 
-public interface NNPlatform {
+public interface NNPlatform extends Profilable<SimpleProfilerGroup> {
 
     void init();
 

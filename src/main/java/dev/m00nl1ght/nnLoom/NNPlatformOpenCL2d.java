@@ -1,6 +1,8 @@
 package dev.m00nl1ght.nnLoom;
 
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
+import dev.m00nl1ght.nnLoom.profiler.impl.SimpleCyclicProfilerEntry;
+import dev.m00nl1ght.nnLoom.profiler.impl.SimpleProfilerGroup;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.PointerBuffer;
 
@@ -9,6 +11,7 @@ import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
@@ -31,6 +34,22 @@ public class NNPlatformOpenCL2d implements NNPlatform {
     private long[] clKernelBackH;
     private long[] clKernelBackO;
     private long clKernelApplyDeltas;
+
+    private SimpleProfilerGroup pGroup;
+    private SimpleCyclicProfilerEntry pEntryPredictSetup;
+    private SimpleCyclicProfilerEntry pEntryPredictReadResults;
+    private SimpleCyclicProfilerEntry pEntryPredictFeedForward;
+    private SimpleCyclicProfilerEntry pEntryTrainSetup;
+    private SimpleCyclicProfilerEntry pEntryTrainFeedForward;
+    private SimpleCyclicProfilerEntry pEntryTrainBackProp;
+    private SimpleCyclicProfilerEntry pEntryForwardSetup;
+    private SimpleCyclicProfilerEntry pEntryForwardRun;
+    private SimpleCyclicProfilerEntry pEntryBackOutSetup;
+    private SimpleCyclicProfilerEntry pEntryBackOutRun;
+    private SimpleCyclicProfilerEntry pEntryBackSetup;
+    private SimpleCyclicProfilerEntry pEntryBackRun;
+    private SimpleCyclicProfilerEntry pEntryBackApplySetup;
+    private SimpleCyclicProfilerEntry pEntryBackApplyRun;
 
     public NNPlatformOpenCL2d(CLContext clContext) {
         this.clContext = Objects.requireNonNull(clContext);
@@ -89,11 +108,15 @@ public class NNPlatformOpenCL2d implements NNPlatform {
         checkBuffer(input, inputCount * network.getInputCount());
         if (batchSize < 0) batchSize = inputCount;
 
+        begin(pEntryPredictSetup);
+
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount, batchSize);
         final var bfWeights = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
         final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
+
+        end(pEntryPredictSetup);
 
         final var sTime = System.currentTimeMillis();
 
@@ -104,12 +127,16 @@ public class NNPlatformOpenCL2d implements NNPlatform {
             final var bSize = Math.min(batchSize, bRemaining);
             final var bOffset = bNum * batchSize;
 
+            begin(pEntryPredictFeedForward);
             feedForward(network, bfInput, bOffset, bSize, bfVals, bfWeights, bfBiases);
+            end(pEntryPredictFeedForward);
 
+            begin(pEntryPredictReadResults);
             results.limit(network.getOutputCount() * (bOffset + bSize));
             results.position(network.getOutputCount() * bOffset);
             final var bfResult = bfVals[network.getLayers().size() - 1];
             checkCLError(clEnqueueReadBuffer(clCommandQueue, bfResult, true, 0, results, null, null));
+            end(pEntryPredictReadResults);
 
             bRemaining -= bSize;
             bNum++;
@@ -137,6 +164,8 @@ public class NNPlatformOpenCL2d implements NNPlatform {
         checkBuffer(targets, inputCount * network.getOutputCount());
         if (batchSize < 0) batchSize = inputCount;
 
+        begin(pEntryTrainSetup);
+
         // shuffleBuffers(network, inputCount, input, targets);
 
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
@@ -145,6 +174,8 @@ public class NNPlatformOpenCL2d implements NNPlatform {
         final var bfDeltas = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount, batchSize);
         final var bfWeights = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
+
+        end(pEntryTrainSetup);
 
         final var sTime = System.currentTimeMillis();
 
@@ -157,8 +188,13 @@ public class NNPlatformOpenCL2d implements NNPlatform {
                 final var bSize = Math.min(batchSize, bRemaining);
                 final var bOffset = bNum * batchSize;
 
+                begin(pEntryTrainFeedForward);
                 feedForward(network, bfInput, bOffset, bSize, bfVals, bfWeights, bfBiases);
+                end(pEntryTrainFeedForward);
+
+                begin(pEntryTrainBackProp);
                 backProp(network, bfInput, bfTargets, bOffset, bSize, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
+                end(pEntryTrainBackProp);
 
                 bRemaining -= bSize;
                 bNum++;
@@ -188,6 +224,8 @@ public class NNPlatformOpenCL2d implements NNPlatform {
 
         for (int layerIdx = 0; layerIdx < layers.size(); layerIdx++) {
 
+            begin(pEntryForwardSetup);
+
             final var layer = layers.get(layerIdx);
             final var kern = clKernelForward[layer.getActivation().ordinal()];
 
@@ -205,7 +243,11 @@ public class NNPlatformOpenCL2d implements NNPlatform {
                 clSetKernelArg1p(kern, 6, bfVals[layerIdx - 1]);
             }
 
+            end(pEntryForwardSetup);
+
+            begin(pEntryForwardRun);
             runKernel(kern, layer.getNodeCount(), size);
+            end(pEntryForwardRun);
 
         }
 
@@ -213,6 +255,8 @@ public class NNPlatformOpenCL2d implements NNPlatform {
 
     private void backProp(NNetwork network, long bfInput, long bfTargets, int offset, int size,
                           long[] bfVals, long[] bfDeltas, long[] bfWeights, long[] bfBiases, float learningRate) {
+
+        begin(pEntryBackOutSetup);
 
         final var layers = network.getLayers();
         final var outputLayerIdx = layers.size() - 1;
@@ -225,9 +269,15 @@ public class NNPlatformOpenCL2d implements NNPlatform {
         clSetKernelArg1i(kernO, 3, offset * outputLayer.getNodeCount());
         clSetKernelArg1p(kernO, 4, bfTargets);
 
+        end(pEntryBackOutSetup);
+
+        begin(pEntryBackOutRun);
         runKernel(kernO, outputLayer.getNodeCount(), size);
+        end(pEntryBackOutRun);
 
         for (int layerIdx = outputLayerIdx - 1; layerIdx >= 0; layerIdx--) {
+
+            begin(pEntryBackSetup);
 
             final var layer = layers.get(layerIdx);
             final var kern = clKernelBackH[layer.getActivation().ordinal()];
@@ -239,11 +289,17 @@ public class NNPlatformOpenCL2d implements NNPlatform {
             clSetKernelArg1p(kern, 4, bfDeltas[layerIdx + 1]);
             clSetKernelArg1p(kern, 5, bfWeights[layerIdx + 1]);
 
+            end(pEntryBackSetup);
+
+            begin(pEntryBackRun);
             runKernel(kern, layer.getNodeCount(), size);
+            end(pEntryBackRun);
 
         }
 
         for (int layerIdx = outputLayerIdx; layerIdx >= 0; layerIdx--) {
+
+            begin(pEntryBackApplySetup);
 
             final var layer = layers.get(layerIdx);
 
@@ -264,7 +320,11 @@ public class NNPlatformOpenCL2d implements NNPlatform {
 
             clSetKernelArg1f(clKernelApplyDeltas, 8, learningRate);
 
+            end(pEntryBackApplySetup);
+
+            begin(pEntryBackApplyRun);
             runKernel(clKernelApplyDeltas, layer.getNodeCount(), size);
+            end(pEntryBackApplyRun);
 
         }
 
@@ -411,6 +471,56 @@ public class NNPlatformOpenCL2d implements NNPlatform {
 
         clCommandQueue = -1;
 
+    }
+
+    @Override
+    public void attachProfiler(SimpleProfilerGroup profilerGroup) {
+        this.pGroup = Objects.requireNonNull(profilerGroup);
+        this.pEntryPredictSetup = pGroup.entry("predict_setup");
+        this.pEntryPredictReadResults = pGroup.entry("predict_readResults");
+        this.pEntryPredictFeedForward = pGroup.entry("predict_feedForward");
+        this.pEntryTrainSetup = pGroup.entry("train_setup");
+        this.pEntryTrainFeedForward = pGroup.entry("train_feedForward");
+        this.pEntryTrainBackProp = pGroup.entry("train_backProp");
+        this.pEntryForwardSetup = pGroup.entry("forward_setup");
+        this.pEntryForwardRun = pGroup.entry("forward_run");
+        this.pEntryBackOutSetup = pGroup.entry("backprop_out_setup");
+        this.pEntryBackOutRun = pGroup.entry("backprop_out_run");
+        this.pEntryBackSetup = pGroup.entry("backprop_setup");
+        this.pEntryBackRun = pGroup.entry("backprop_run");
+        this.pEntryBackApplySetup = pGroup.entry("backprop_apply_setup");
+        this.pEntryBackApplyRun = pGroup.entry("backprop_apply_run");
+    }
+
+    @Override
+    public void detachAllProfilers() {
+        this.pGroup = null;
+        this.pEntryPredictSetup = null;
+        this.pEntryPredictReadResults = null;
+        this.pEntryPredictFeedForward = null;
+        this.pEntryTrainSetup = null;
+        this.pEntryTrainFeedForward = null;
+        this.pEntryTrainBackProp = null;
+        this.pEntryForwardSetup = null;
+        this.pEntryForwardRun = null;
+        this.pEntryBackOutSetup = null;
+        this.pEntryBackOutRun = null;
+        this.pEntryBackSetup = null;
+        this.pEntryBackRun = null;
+        this.pEntryBackApplySetup = null;
+        this.pEntryBackApplyRun = null;
+    }
+
+    @Override
+    public Set<SimpleProfilerGroup> attachDefaultProfilers() {
+        final var profiler = new SimpleProfilerGroup("platform_opencl_2d");
+        this.attachProfiler(profiler);
+        return Set.of(profiler);
+    }
+
+    @Override
+    public boolean supportsProfilers() {
+        return true;
     }
 
 }

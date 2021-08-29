@@ -49,7 +49,7 @@ public class MnistExample {
         nnPlatform.train(network, MNIST_SIZE_TR, dataTr, labelsTr, 5, 100, 0.01f);
 
         System.out.println("Evaluating network ...");
-        eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 0);
+        eval(nnPlatform, network, dataTe, labelsTe, MNIST_SIZE_TE, 3);
 
         System.out.println("--------------------------------------------------------------");
 

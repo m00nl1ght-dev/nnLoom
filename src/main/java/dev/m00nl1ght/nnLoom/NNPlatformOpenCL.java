@@ -1,12 +1,15 @@
 package dev.m00nl1ght.nnLoom;
 
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
+import dev.m00nl1ght.nnLoom.profiler.impl.SimpleCyclicProfilerEntry;
+import dev.m00nl1ght.nnLoom.profiler.impl.SimpleProfilerGroup;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.PointerBuffer;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -25,6 +28,20 @@ public class NNPlatformOpenCL implements NNPlatform {
     private long[] clKernelForward;
     private long[] clKernelBackH;
     private long[] clKernelBackO;
+
+    private SimpleProfilerGroup pGroup;
+    private SimpleCyclicProfilerEntry pEntryPredictSetup;
+    private SimpleCyclicProfilerEntry pEntryPredictReadResults;
+    private SimpleCyclicProfilerEntry pEntryPredictFeedForward;
+    private SimpleCyclicProfilerEntry pEntryTrainSetup;
+    private SimpleCyclicProfilerEntry pEntryTrainFeedForward;
+    private SimpleCyclicProfilerEntry pEntryTrainBackProp;
+    private SimpleCyclicProfilerEntry pEntryForwardSetup;
+    private SimpleCyclicProfilerEntry pEntryForwardRun;
+    private SimpleCyclicProfilerEntry pEntryBackOutSetup;
+    private SimpleCyclicProfilerEntry pEntryBackOutRun;
+    private SimpleCyclicProfilerEntry pEntryBackSetup;
+    private SimpleCyclicProfilerEntry pEntryBackRun;
 
     public NNPlatformOpenCL(CLContext clContext) {
         this.clContext = Objects.requireNonNull(clContext);
@@ -79,23 +96,29 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkContext(true);
         checkBuffer(input, inputCount * network.getInputCount());
 
+        begin(pEntryPredictSetup);
+
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
         final var bfWeights = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
         final var results = BufferUtils.createFloatBuffer(network.getOutputCount() * inputCount);
 
+        end(pEntryPredictSetup);
+
         final var sTime = System.currentTimeMillis();
 
         for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
-
+            begin(pEntryPredictFeedForward);
             feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
+            end(pEntryPredictFeedForward);
 
+            begin(pEntryPredictReadResults);
             results.limit(network.getOutputCount() * (inputIdx + 1));
             results.position(network.getOutputCount() * inputIdx);
             final var bfResult = bfVals[network.getLayers().size() - 1];
             checkCLError(clEnqueueReadBuffer(clCommandQueue, bfResult, true, 0, results, null, null));
-
+            end(pEntryPredictReadResults);
         }
 
         final var eTime = System.currentTimeMillis();
@@ -118,6 +141,8 @@ public class NNPlatformOpenCL implements NNPlatform {
         checkBuffer(input, inputCount * network.getInputCount());
         checkBuffer(targets, inputCount * network.getOutputCount());
 
+        begin(pEntryTrainSetup);
+
         final var bfInput = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input);
         final var bfTargets = createBuffer(CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, targets);
         final var bfVals = createBuffers(network, CL_MEM_READ_WRITE, NNLayer::getNodeCount);
@@ -125,12 +150,19 @@ public class NNPlatformOpenCL implements NNPlatform {
         final var bfWeights = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getWeights);
         final var bfBiases = createBuffers(network, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, NNLayer::getBiases);
 
+        end(pEntryTrainSetup);
+
         final var sTime = System.currentTimeMillis();
 
         for (int e = 0; e < epochs; e++) {
             for (int inputIdx = 0; inputIdx < inputCount; inputIdx++) {
+                begin(pEntryTrainFeedForward);
                 feedForward(network, bfInput, inputIdx, bfVals, bfWeights, bfBiases);
+                end(pEntryTrainFeedForward);
+
+                begin(pEntryTrainBackProp);
                 backProp(network, bfInput, bfTargets, inputIdx, bfVals, bfDeltas, bfWeights, bfBiases, learningRate);
+                end(pEntryTrainBackProp);
             }
         }
 
@@ -155,6 +187,8 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         for (int layerIdx = 0; layerIdx < layers.size(); layerIdx++) {
 
+            begin(pEntryForwardSetup);
+
             final var layer = layers.get(layerIdx);
             final var kern = clKernelForward[layer.getActivation().ordinal()];
 
@@ -171,7 +205,11 @@ public class NNPlatformOpenCL implements NNPlatform {
                 clSetKernelArg1p(kern, 5, bfVals[layerIdx - 1]);
             }
 
+            end(pEntryForwardSetup);
+
+            begin(pEntryForwardRun);
             runKernel(kern, layer.getNodeCount());
+            end(pEntryForwardRun);
 
         }
 
@@ -179,6 +217,8 @@ public class NNPlatformOpenCL implements NNPlatform {
 
     private void backProp(NNetwork network, long bfInput, long bfTargets, int inputIdx,
                           long[] bfVals, long[] bfDeltas, long[] bfWeights, long[] bfBiases, float learningRate) {
+
+        begin(pEntryBackOutSetup);
 
         final var layers = network.getLayers();
         final var outputLayerIdx = layers.size() - 1;
@@ -204,9 +244,15 @@ public class NNPlatformOpenCL implements NNPlatform {
         clSetKernelArg1p(kernO, 9, bfTargets);
         clSetKernelArg1f(kernO, 10, learningRate);
 
+        end(pEntryBackOutSetup);
+
+        begin(pEntryBackOutRun);
         runKernel(kernO, outputLayer.getNodeCount());
+        end(pEntryBackOutRun);
 
         for (int layerIdx = outputLayerIdx - 1; layerIdx >= 0; layerIdx--) {
+
+            begin(pEntryBackSetup);
 
             final var layer = layers.get(layerIdx);
             final var kern = clKernelBackH[layer.getActivation().ordinal()];
@@ -231,7 +277,11 @@ public class NNPlatformOpenCL implements NNPlatform {
 
             clSetKernelArg1f(kern, 11, learningRate);
 
+            end(pEntryBackSetup);
+
+            begin(pEntryBackRun);
             runKernel(kern, layer.getNodeCount());
+            end(pEntryBackRun);
 
         }
 
@@ -344,6 +394,52 @@ public class NNPlatformOpenCL implements NNPlatform {
 
         clCommandQueue = -1;
 
+    }
+
+    @Override
+    public void attachProfiler(SimpleProfilerGroup profilerGroup) {
+        this.pGroup = Objects.requireNonNull(profilerGroup);
+        this.pEntryPredictSetup = pGroup.entry("predict_setup");
+        this.pEntryPredictReadResults = pGroup.entry("predict_readResults");
+        this.pEntryPredictFeedForward = pGroup.entry("predict_feedForward");
+        this.pEntryTrainSetup = pGroup.entry("train_setup");
+        this.pEntryTrainFeedForward = pGroup.entry("train_feedForward");
+        this.pEntryTrainBackProp = pGroup.entry("train_backProp");
+        this.pEntryForwardSetup = pGroup.entry("forward_setup");
+        this.pEntryForwardRun = pGroup.entry("forward_run");
+        this.pEntryBackOutSetup = pGroup.entry("backprop_out_setup");
+        this.pEntryBackOutRun = pGroup.entry("backprop_out_run");
+        this.pEntryBackSetup = pGroup.entry("backprop_setup");
+        this.pEntryBackRun = pGroup.entry("backprop_run");
+    }
+
+    @Override
+    public void detachAllProfilers() {
+        this.pGroup = null;
+        this.pEntryPredictSetup = null;
+        this.pEntryPredictReadResults = null;
+        this.pEntryPredictFeedForward = null;
+        this.pEntryTrainSetup = null;
+        this.pEntryTrainFeedForward = null;
+        this.pEntryTrainBackProp = null;
+        this.pEntryForwardSetup = null;
+        this.pEntryForwardRun = null;
+        this.pEntryBackOutSetup = null;
+        this.pEntryBackOutRun = null;
+        this.pEntryBackSetup = null;
+        this.pEntryBackRun = null;
+    }
+
+    @Override
+    public Set<SimpleProfilerGroup> attachDefaultProfilers() {
+        final var profiler = new SimpleProfilerGroup("platform_opencl");
+        this.attachProfiler(profiler);
+        return Set.of(profiler);
+    }
+
+    @Override
+    public boolean supportsProfilers() {
+        return true;
     }
 
 }

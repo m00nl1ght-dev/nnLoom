@@ -3,6 +3,8 @@ package dev.m00nl1ght.nnLoom;
 import dev.m00nl1ght.nnLoom.examples.MnistExample;
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
 import dev.m00nl1ght.nnLoom.opencl.CLDevice;
+import dev.m00nl1ght.nnLoom.profiler.DebugProfiler;
+import dev.m00nl1ght.nnLoom.profiler.DebugUtils;
 
 import java.util.Random;
 
@@ -19,6 +21,8 @@ public class Main {
 
         for (CLDevice device : devs) {
 
+            // if (!device.getPlatformInfo(CL_PLATFORM_NAME).contains("NVIDIA")) continue;
+
             System.out.println("--------------------------------------------------------------");
             System.out.println("Platform name: " + device.getPlatformInfo(CL_PLATFORM_NAME));
             System.out.println("Device name: " + device.getDeviceInfo(CL_DEVICE_NAME));
@@ -29,8 +33,14 @@ public class Main {
             final var nnPlatform = new NNPlatformOpenCL2d(context);
             nnPlatform.init();
 
+            final var profilerGroup = nnPlatform.attachDefaultProfilers().stream().findFirst().orElseThrow();
+            final var profiler = new DebugProfiler();
+            profiler.addGroup(profilerGroup);
+
             // XorExample.run(nnPlatform, initSeed);
             MnistExample.run(nnPlatform, initSeed);
+
+            System.out.println(DebugUtils.printProfilerInfo(profiler));
 
             nnPlatform.dispose();
             CLContext.release();
