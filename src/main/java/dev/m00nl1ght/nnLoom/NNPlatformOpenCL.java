@@ -351,7 +351,7 @@ public class NNPlatformOpenCL implements NNPlatform {
     public float eval(FloatBuffer predicted, FloatBuffer targets, ErrorFunction function, int outputCount, int sampleCount) {
         switch (function) {
 
-            case ME -> {
+            case MAE -> {
                 var sum = 0f;
 
                 for (int i = 0; i < sampleCount; i++) {
