@@ -1,4 +1,14 @@
 
+// All kernels were implemented based on the equations, explainations and samples from the following sources:
+// https://www.math.purdue.edu/~nwinovic/deep_learning.html
+// https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
+// https://www.math.purdue.edu/~nwinovic/deep_learning_optimization.html
+// https://towardsdatascience.com/implementing-the-xor-gate-using-backpropagation-in-neural-networks-c1f255b4f20d
+// http://forum.lwjgl.org/index.php?topic=6521.0
+// https://github.com/rsnemmen/OpenCL-examples/blob/master/sum_array/vecAdd.c
+// https://github.com/pablo-mayrgundter/freality/blob/master/ml/nn/Backprop.java
+// https://github.com/LWJGL/lwjgl3/tree/master/modules/samples/src/test/java/org/lwjgl/demo/opencl
+
 kernel void forwardSigmoid
 (
     const int cSize,                    // number of nodes in current layer
@@ -147,6 +157,7 @@ kernel void applyDeltas
     cBiases[i] += delta * lr;
 
     for (int p = 0; p < pSize; p++) {
-        cWeights[i * pSize + p] += lr * delta * pVals[p + pOffset + j * pSize];
+        const float dw = lr * delta * pVals[p + pOffset + j * pSize];
+        cWeights[i * pSize + p] += dw;
     }
 }

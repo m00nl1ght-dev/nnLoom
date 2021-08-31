@@ -25,7 +25,7 @@ public class MnistExample {
     public static void run(NNPlatform nnPlatform, long initSeed) {
 
         final var network = NNetwork.builder(MNIST_PX * MNIST_PX)
-                .layerFC(42, Activation.Tanh, Initialisation.Xavier)
+                .layerFC(50, Activation.Tanh, Initialisation.Xavier)
                 .layerFC(10, Activation.Tanh, Initialisation.Xavier)
                 .layerFC(MNIST_CAT, Activation.Sigmoid, Initialisation.Uniform)
                 .build();

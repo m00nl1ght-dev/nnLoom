@@ -15,8 +15,7 @@ public class XorExample {
     public static void run(NNPlatform nnPlatform, long initSeed) {
 
         final var network = NNetwork.builder(2)
-                .layerFC(10, Activation.Tanh, Initialisation.Xavier)
-                .layerFC(5, Activation.Tanh, Initialisation.Xavier)
+                .layerFC(2, Activation.Tanh, Initialisation.Xavier)
                 .layerFC(1, Activation.Sigmoid, Initialisation.Uniform)
                 .build();
 
