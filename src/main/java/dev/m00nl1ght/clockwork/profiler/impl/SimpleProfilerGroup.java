@@ -1,7 +1,7 @@
-package dev.m00nl1ght.nnLoom.profiler.impl;
+package dev.m00nl1ght.clockwork.profiler.impl;
 
-import dev.m00nl1ght.nnLoom.profiler.ProfilerEntry;
-import dev.m00nl1ght.nnLoom.profiler.ProfilerGroup;
+import dev.m00nl1ght.clockwork.profiler.ProfilerEntry;
+import dev.m00nl1ght.clockwork.profiler.ProfilerGroup;
 
 import java.util.LinkedHashMap;
 import java.util.List;

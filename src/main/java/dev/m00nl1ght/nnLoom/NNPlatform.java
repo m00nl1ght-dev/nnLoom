@@ -1,7 +1,7 @@
 package dev.m00nl1ght.nnLoom;
 
-import dev.m00nl1ght.nnLoom.profiler.Profilable;
-import dev.m00nl1ght.nnLoom.profiler.impl.SimpleProfilerGroup;
+import dev.m00nl1ght.clockwork.profiler.Profilable;
+import dev.m00nl1ght.clockwork.profiler.impl.SimpleProfilerGroup;
 
 import java.nio.FloatBuffer;
 

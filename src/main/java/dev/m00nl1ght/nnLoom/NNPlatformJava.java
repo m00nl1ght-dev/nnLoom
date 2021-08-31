@@ -1,7 +1,7 @@
 package dev.m00nl1ght.nnLoom;
 
-import dev.m00nl1ght.nnLoom.profiler.impl.SimpleCyclicProfilerEntry;
-import dev.m00nl1ght.nnLoom.profiler.impl.SimpleProfilerGroup;
+import dev.m00nl1ght.clockwork.profiler.impl.SimpleCyclicProfilerEntry;
+import dev.m00nl1ght.clockwork.profiler.impl.SimpleProfilerGroup;
 import org.lwjgl.BufferUtils;
 
 import java.nio.FloatBuffer;

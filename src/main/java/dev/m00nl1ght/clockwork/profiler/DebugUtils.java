@@ -1,4 +1,4 @@
-package dev.m00nl1ght.nnLoom.profiler;
+package dev.m00nl1ght.clockwork.profiler;
 
 import java.io.BufferedWriter;
 import java.io.File;

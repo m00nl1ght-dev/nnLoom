@@ -1,6 +1,6 @@
-package dev.m00nl1ght.nnLoom.profiler.impl;
+package dev.m00nl1ght.clockwork.profiler.impl;
 
-import dev.m00nl1ght.nnLoom.profiler.ProfilerEntry;
+import dev.m00nl1ght.clockwork.profiler.ProfilerEntry;
 
 public class SimpleCyclicProfilerEntry extends ProfilerEntry {
 

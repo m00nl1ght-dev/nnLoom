@@ -4,8 +4,8 @@ import dev.m00nl1ght.nnLoom.examples.MnistExample;
 import dev.m00nl1ght.nnLoom.examples.XorExample;
 import dev.m00nl1ght.nnLoom.opencl.CLContext;
 import dev.m00nl1ght.nnLoom.opencl.CLDevice;
-import dev.m00nl1ght.nnLoom.profiler.DebugProfiler;
-import dev.m00nl1ght.nnLoom.profiler.DebugUtils;
+import dev.m00nl1ght.clockwork.profiler.DebugProfiler;
+import dev.m00nl1ght.clockwork.profiler.DebugUtils;
 
 import java.util.Random;
 
@@ -21,12 +21,10 @@ public class Main {
         final var argPlatform = args.length > 1 ? args[1] : "opencl2d";
         final var argSeed = args.length > 2 ? args[2] : null;
 
-        final var devs = CLDevice.getAvailableDevices(CL_DEVICE_TYPE_CPU);
+        final var devs = CLDevice.getAvailableDevices(CL_DEVICE_TYPE_GPU);
         final var initSeed = argSeed == null ? new Random().nextLong() : argSeed.hashCode();
 
         for (CLDevice device : devs) {
-
-            // if (!device.getPlatformInfo(CL_PLATFORM_NAME).contains("NVIDIA")) continue;
 
             System.out.println("--------------------------------------------------------------");
             System.out.println("OpenCL Platform name: " + device.getPlatformInfo(CL_PLATFORM_NAME));
